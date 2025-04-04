@@ -124,3 +124,7 @@ export const initAuthCreds = () => {
         routingInfo: undefined
     };
 };
+
+export function normalizeRows(result: any): any[] {
+    return result?.rows || [];
+}

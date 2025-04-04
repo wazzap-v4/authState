@@ -1,4 +1,5 @@
 import { Connection } from 'mysql2/promise';
+import { Client } from 'pg';
 import Long from 'long';
 
 type Awaitable<T> = T | Promise<T>;
@@ -137,6 +138,33 @@ export interface sqlConnection extends Connection {
         _closing?: boolean;
     };
 }
+
+export interface PgConnection extends Client {
+    ended?: boolean;
+}
+
+export type PostgresConfig = {
+    /* The hostname of the database you are connecting to. (Default: localhost) */
+    host?: string;
+    /* The port number to connect to. (Default: 5432) */
+    port?: number;
+    /* The postgres user to authenticate as. (Default: root) */
+    user?: string;
+    /* The password of that postgres user */
+    password: string;
+    /* Name of the database to use for this connection. (Default: base) */
+    database: string;
+    /* postgres table name. (Default: auth) */
+    tableName?: string;
+    /* Use the config SSL. (Default: disabled) */
+    ssl?: string | SslOptions;
+    /* Session name to identify the connection, allowing multisessions with postgres. */
+    session: string;
+    /* Retry the query at each interval if it fails. (Default: 200ms) */
+    retryRequestDelayMs?: number;
+    /* Maximum attempts if the query fails. (Default: 10) */
+    maxtRetries?: number;
+};
 
 export type MySQLConfig = {
     /* The hostname of the database you are connecting to. (Default: localhost) */

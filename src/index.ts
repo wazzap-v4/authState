@@ -1,3 +1,4 @@
 import { useMySQLAuthState } from './Mysql';
-export { useMySQLAuthState };
+import { usePostgreSQLAuthState } from './PostgreSQL';
+export { useMySQLAuthState, usePostgreSQLAuthState };
 export default useMySQLAuthState;

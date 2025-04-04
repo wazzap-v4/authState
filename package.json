@@ -1,6 +1,6 @@
 {
     "author": "bobslavtriev",
-    "name": "mysql-baileys",
+    "name": "authstate-baileys",
     "version": "1.5.2",
     "main": "lib/index.js",
     "types": "lib/index.d.ts",
@@ -31,7 +31,8 @@
         "baileys": "^6.7.16",
         "libsignal": "github:adiwajshing/libsignal-node",
         "long": "^5.3.1",
-        "mysql2": "^3.3.5"
+        "mysql2": "^3.3.5",
+        "pg": "^8.14.1"
     },
     "devDependencies": {
         "@adiwajshing/eslint-config": "github:adiwajshing/eslint-config",
