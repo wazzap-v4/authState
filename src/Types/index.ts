@@ -1,4 +1,5 @@
 import { Connection } from 'mysql2/promise';
+import Long from 'long';
 
 type Awaitable<T> = T | Promise<T>;
 

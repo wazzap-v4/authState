@@ -1,6 +1,7 @@
 import { curve } from 'libsignal';
 import { randomBytes, randomUUID } from 'crypto';
 import { KeyPair, valueReplacer, valueReviver, AppDataSync, Fingerprint } from '../Types';
+import Long from 'long';
 
 const generateKeyPair = () => {
     const { pubKey, privKey } = curve.generateKeyPair();
