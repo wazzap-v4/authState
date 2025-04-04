@@ -1,0 +1,12 @@
+node_modules/
+dist/
+debug/
+tmp/
+build/
+sessiondata/
+logs/
+tsconfig.json
+package-lock.json
+yarn.lock
+.DS_Store
+src/worker/**/*
