@@ -1,11 +1,11 @@
 {
-    "author": "bobslavtriev",
+    "author": "lomelidev",
     "name": "authstate-baileys",
-    "version": "1.5.2",
+    "version": "1.0.0",
     "main": "lib/index.js",
     "types": "lib/index.d.ts",
-    "description": "Implementation of MySQL in Baileys.",
-    "homepage": "https://github.com/bobslavtriev/mysql-baileys",
+    "description": "Implementation of MySQL, PostgreSQL, Redis, Work Thread Nodejs in Baileys.",
+    "homepage": "https://github.com/wazzap-v4/authState",
     "license": "MIT",
     "files": [
         "lib/*"
@@ -25,14 +25,15 @@
         "format:write": "prettier --write ."
     },
     "repository": {
-        "url": "git+ssh://git@github.com/bobslavtriev/mysql-baileys.git"
+        "url": "git+ssh://git@github.com/wazzap-v4/authState.git"
     },
     "dependencies": {
-        "baileys": "^6.7.16",
+        "ioredis": "^5.6.0",
         "libsignal": "github:adiwajshing/libsignal-node",
         "long": "^5.3.1",
         "mysql2": "^3.3.5",
-        "pg": "^8.14.1"
+        "pg": "^8.14.1",
+        "uuid": "^11.1.0"
     },
     "devDependencies": {
         "@adiwajshing/eslint-config": "github:adiwajshing/eslint-config",

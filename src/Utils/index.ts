@@ -2,6 +2,29 @@ import { curve } from 'libsignal';
 import { randomBytes, randomUUID } from 'crypto';
 import { KeyPair, valueReplacer, valueReviver, AppDataSync, Fingerprint } from '../Types';
 import Long from 'long';
+import { v4 as uuidv4 } from 'uuid';
+import { MessagePort } from 'worker_threads';
+
+export function createRequestChannel(port: MessagePort) {
+    const pending = new Map();
+
+    port.on('message', (event) => {
+        const { id, result, error } = event;
+        const p = pending.get(id);
+        if (p) {
+            error ? p.reject(error) : p.resolve(result);
+            pending.delete(id);
+        }
+    });
+
+    return (payload) => {
+        const id = uuidv4();
+        return new Promise((resolve, reject) => {
+            pending.set(id, { resolve, reject });
+            port.postMessage({ id, ...payload });
+        });
+    };
+}
 
 const generateKeyPair = () => {
     const { pubKey, privKey } = curve.generateKeyPair();

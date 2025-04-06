@@ -1,6 +1,7 @@
 import { Connection } from 'mysql2/promise';
 import { Client } from 'pg';
 import Long from 'long';
+import { MessagePort } from 'worker_threads';
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -142,6 +143,25 @@ export interface sqlConnection extends Connection {
 export interface PgConnection extends Client {
     ended?: boolean;
 }
+
+export type WorkConfig = {
+    port: MessagePort;
+    session: string;
+    retryRequestDelayMs?: number;
+    maxtRetries?: number;
+    typeDB?: string;
+};
+
+export type RedisConfig = {
+    host?: string;
+    port?: number;
+    username?: string;
+    password?: string;
+    db?: number;
+    tls?: boolean;
+    force?: boolean;
+    session: string;
+};
 
 export type PostgresConfig = {
     /* The hostname of the database you are connecting to. (Default: localhost) */
