@@ -8,6 +8,7 @@ type Awaitable<T> = T | Promise<T>;
 type Contact = {
     id: string;
     lid?: string;
+    jid?: string;
     name?: string;
     notify?: string;
     verifiedName?: string;
@@ -69,16 +70,6 @@ type SignalKeyStore = {
     clear?(): Awaitable<void>;
 };
 
-interface RegistrationOptions {
-    phoneNumber?: string;
-    phoneNumberCountryCode: string;
-    phoneNumberNationalNumber: string;
-    phoneNumberMobileCountryCode: string;
-    phoneNumberMobileNetworkCode: string;
-    method?: 'sms' | 'voice' | 'captcha';
-    captcha?: string;
-}
-
 export type SslOptions = {
     pfx?: string;
     key?: string | string[] | Buffer | Buffer[];
@@ -123,8 +114,8 @@ export type SignalDataSet = {
 };
 
 export type KeyPair = {
-    public: Uint8Array;
-    private: Uint8Array;
+    public: Uint8Array | Buffer;
+    private: Uint8Array | Buffer;
 };
 
 export type sqlData = {
@@ -229,8 +220,10 @@ export type valueReplacer = {
 };
 
 export type valueReviver = {
-    data: string;
-    type: string;
+    data?: string | number[];
+    value?: string | number[];
+    type?: string;
+    buffer?: boolean;
 };
 
 export type AuthenticationState = {
@@ -253,13 +246,7 @@ export type AuthenticationCreds = SignalCreds & {
     processedHistoryMessages: Pick<any, 'key' | 'messageTimestamp'>[];
     accountSyncCounter: number;
     accountSettings: AccountSettings;
-    deviceId: string;
-    phoneId: string;
-    identityId: Buffer;
-    registered: boolean;
-    backupToken: Buffer;
-    registration: RegistrationOptions;
-    pairingCode: string | undefined;
-    lastPropHash: string | undefined;
-    routingInfo: Buffer | undefined;
+    pairingCode?: string;
+    lastPropHash?: string;
+    routingInfo?: Buffer;
 };

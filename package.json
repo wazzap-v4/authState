@@ -29,9 +29,9 @@
     },
     "dependencies": {
         "ioredis": "^5.6.0",
-        "libsignal": "github:adiwajshing/libsignal-node",
         "long": "^5.3.1",
-        "mysql2": "^3.3.5",
+        "curve25519-js": "^0.0.4",
+        "mysql2": "^3.10.1",
         "pg": "^8.14.1",
         "uuid": "^11.1.0"
     },

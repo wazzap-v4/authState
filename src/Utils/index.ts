@@ -1,6 +1,6 @@
-import { curve } from 'libsignal';
-import { randomBytes, randomUUID } from 'crypto';
-import { KeyPair, valueReplacer, valueReviver, AppDataSync, Fingerprint } from '../Types';
+import * as curveJs from 'curve25519-js';
+import { randomBytes, generateKeyPairSync } from 'crypto';
+import { KeyPair, valueReviver, AppDataSync, Fingerprint } from '../Types';
 import Long from 'long';
 import { v4 as uuidv4 } from 'uuid';
 import { MessagePort } from 'worker_threads';
@@ -26,26 +26,49 @@ export function createRequestChannel(port: MessagePort) {
     };
 }
 
-const generateKeyPair = () => {
-    const { pubKey, privKey } = curve.generateKeyPair();
-    return {
-        private: Buffer.from(privKey),
-        public: Buffer.from(pubKey.slice(1))
-    };
+const generateKeyPair = (): KeyPair => {
+    try {
+        const { publicKey, privateKey } = generateKeyPairSync('x25519');
+
+        const pubBuffer = Buffer.from(
+            publicKey.export({
+                format: 'der',
+                type: 'spki'
+            })
+        );
+
+        const privBuffer = Buffer.from(
+            privateKey.export({
+                format: 'der',
+                type: 'pkcs8'
+            })
+        );
+
+        return {
+            public: pubBuffer.slice(12, 44),
+            private: privBuffer.slice(16, 48)
+        };
+    } catch (e) {
+        const keyPair = curveJs.generateKeyPair(randomBytes(32));
+        return {
+            public: Buffer.from(keyPair.public),
+            private: Buffer.from(keyPair.private)
+        };
+    }
+};
+
+const calculateSignature = (privKey: Uint8Array | Buffer, message: Uint8Array | Buffer) => {
+    return Buffer.from(curveJs.sign(privKey, message));
 };
 
 const generateSignalPubKey = (pubKey: Uint8Array) => {
     return pubKey.length === 33 ? pubKey : Buffer.concat([Buffer.from([5]), pubKey]);
 };
 
-const sign = (privateKey: object, buf: Uint8Array) => {
-    return curve.calculateSignature(privateKey, buf);
-};
-
 const signedKeyPair = (identityKeyPair: KeyPair, keyId: number) => {
     const preKey = generateKeyPair();
     const pubKey = generateSignalPubKey(preKey.public);
-    const signature = sign(identityKeyPair.private, pubKey);
+    const signature = calculateSignature(identityKeyPair.private, pubKey);
     return { keyPair: preKey, signature, keyId };
 };
 
@@ -103,18 +126,27 @@ export const fromObject = (args: AppDataSync) => {
 };
 
 export const BufferJSON = {
-    replacer: (_: string, value: valueReplacer) => {
-        if (value?.type === 'Buffer' && Array.isArray(value?.data)) {
+    replacer: (_: string, value: any) => {
+        if (Buffer.isBuffer(value) || value instanceof Uint8Array || value?.type === 'Buffer') {
+            const val = value?.data || value;
             return {
                 type: 'Buffer',
-                data: Buffer.from(value?.data).toString('base64')
+                data: Buffer.from(val).toString('base64')
             };
         }
         return value;
     },
     reviver: (_: string, value: valueReviver) => {
-        if (value?.type === 'Buffer') {
-            return Buffer.from(value?.data, 'base64');
+        if (
+            typeof value === 'object' &&
+            !!value &&
+            (value.buffer === true || value.type === 'Buffer')
+        ) {
+            const val = value.data || value.value;
+            if (typeof val === 'string') {
+                return Buffer.from(val, 'base64');
+            }
+            return Buffer.from(val || []);
         }
         return value;
     }
@@ -133,18 +165,10 @@ export const initAuthCreds = () => {
         nextPreKeyId: 1,
         firstUnuploadedPreKeyId: 1,
         accountSyncCounter: 0,
+        registered: false,
         accountSettings: {
             unarchiveChats: false
-        },
-        deviceId: Buffer.from(randomUUID().replace(/-/g, ''), 'hex').toString('base64url'),
-        phoneId: randomUUID(),
-        identityId: randomBytes(20),
-        backupToken: randomBytes(20),
-        registered: false,
-        registration: {} as never,
-        pairingCode: undefined,
-        lastPropHash: undefined,
-        routingInfo: undefined
+        }
     };
 };
 
