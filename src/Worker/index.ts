@@ -33,45 +33,68 @@ export const useWorkerAuthState = async (
     const db = config.typeDB || 'redis';
     const session = config.session || null;
 
-     const query = async (type:string, db:string, values:object) => {
+    const query = async (type: string, db: string, values: object) => {
         for (let x = 0; x < maxtRetries; x++) {
             try {
                 return await work({ type, db, values });
             } catch (e) {
+                if (x === maxtRetries - 1) throw e;
                 await new Promise((r) => setTimeout(r, retryRequestDelayMs));
             }
         }
-        return null;
     };
 
     const getKey = (key: string) => {
-    if (!session) throw new Error('Session ID is required');
-    return `session:${session}:${key}`;
-};
+        if (!session) throw new Error('Session ID is required');
+        return `session:${session}:${key}`;
+    };
 
     const readData = async (id: string) => {
-        const raw = await query('readData', db, { id, session: getKey(id) });
-        if (!raw) return null;
-        const creds = typeof raw === 'object' ? JSON.stringify(raw) : String(raw);
-        const credsParsed = JSON.parse(creds, BufferJSON.reviver);
-        return credsParsed;
+        try {
+            const raw = await query('readData', db, { id, session: getKey(id) });
+            if (!raw) return null;
+            const creds = typeof raw === 'object' ? JSON.stringify(raw) : String(raw);
+            const credsParsed = JSON.parse(creds, BufferJSON.reviver);
+            return credsParsed;
+        } catch {
+            return null;
+        }
     };
 
     const writeData = async (id: string, value: object) => {
         const valueFixed = JSON.stringify(value, BufferJSON.replacer);
-        await query('writeData', db, { id, session:getKey(id), value: valueFixed });
+        await query('writeData', db, { id, session: getKey(id), value: valueFixed });
     };
 
     const removeData = async (id: string) => {
-        await query('removeData', db, { id, session:getKey(id) });
+        await query('removeData', db, { id, session: getKey(id) });
+    };
+
+    const BATCH_SIZE = 100;
+
+    const writeBatch = async (entries: Array<{ id: string; value: string }>) => {
+        if (entries.length === 0) return;
+        for (let i = 0; i < entries.length; i += BATCH_SIZE) {
+            const chunk = entries.slice(i, i + BATCH_SIZE);
+            await query('writeBatch', db, { session: getKey('*'), entries: chunk });
+        }
+    };
+
+    const readBatch = async (ids: string[]) => {
+        if (ids.length === 0) return {} as any;
+        try {
+            return await query('readBatch', db, { session: getKey('*'), ids });
+        } catch {
+            return {} as any;
+        }
     };
 
     const clearAll = async () => {
-        await query('clearAll', db, {  session:getKey("*") });
+        await query('clearAll', db, { session: getKey('*') });
     };
 
     const removeAll = async () => {
-        await query('removeAll', db, {  session:getKey("*") });
+        await query('removeAll', db, { session: getKey('*') });
     };
 
     const creds: AuthenticationCreds = (await readData('creds')) || initAuthCreds();
@@ -81,9 +104,17 @@ export const useWorkerAuthState = async (
             creds: creds,
             keys: {
                 get: async (type, ids) => {
-                    const data: { [id: string]: SignalDataTypeMap[typeof type] } = {};
+                    const fullIds = ids.map(id => `${type}-${id}`);
+                    const raw = await readBatch(fullIds);
+
+                    const data: { [id: string]: any } = {};
                     for (const id of ids) {
-                        let value = await readData(`${type}-${id}`);
+                        const rawValue = raw?.[`${type}-${id}`];
+                        if (!rawValue) {
+                            data[id] = null;
+                            continue;
+                        }
+                        let value = JSON.parse(rawValue, BufferJSON.reviver);
                         if (type === 'app-state-sync-key' && value) {
                             value = fromObject(value);
                         }
@@ -92,16 +123,28 @@ export const useWorkerAuthState = async (
                     return data;
                 },
                 set: async (data) => {
+                    const entries: Array<{ id: string; value: string }> = [];
+                    const removeIds: string[] = [];
+
                     for (const category in data) {
                         for (const id in data[category]) {
                             const value = data[category][id];
                             const name = `${category}-${id}`;
-                            if (value) {
-                                await writeData(name, value);
+                            if (value !== null && value !== undefined) {
+                                entries.push({
+                                    id: name,
+                                    value: JSON.stringify(value, BufferJSON.replacer)
+                                });
                             } else {
-                                await removeData(name);
+                                removeIds.push(name);
                             }
                         }
+                    }
+
+                    await writeBatch(entries);
+
+                    if (removeIds.length > 0) {
+                        await Promise.all(removeIds.map(id => removeData(id)));
                     }
                 }
             }
