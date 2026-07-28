@@ -114,7 +114,8 @@ export const useWorkerAuthState = async (
                             data[id] = null;
                             continue;
                         }
-                        let value = JSON.parse(rawValue, BufferJSON.reviver);
+                        const safeStr = typeof rawValue === "object" ? JSON.stringify(rawValue) : String(rawValue);
+                        let value = JSON.parse(safeStr, BufferJSON.reviver);
                         if (type === 'app-state-sync-key' && value) {
                             value = fromObject(value);
                         }
