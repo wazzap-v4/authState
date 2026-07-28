@@ -8,20 +8,6 @@ import {
     PostgresConfig
 } from '../Types';
 
-/**
- * Stores the full authentication state in PostgreSQL
- * Far more efficient than file
- * @param {string} host - The hostname of the database you are connecting to. (Default: localhost)
- * @param {number} port - The port number to connect to. (Default: 5432)
- * @param {string} user - The PostgreSQL user to authenticate as. (Default: root)
- * @param {string} password - The password of that PostgreSQL user
- * @param {string} database - Name of the database to use for this connection. (Default: base)
- * @param {string} tableName - PostgreSQL table name. (Default: auth)
- * @param {number} retryRequestDelayMs - Retry the query at each interval if it fails. (Default: 200ms)
- * @param {number} maxtRetries - Maximum attempts if the query fails. (Default: 10)
- * @param {string} session - Session name to identify the connection, allowing multisessions with PostgreSQL.
- */
-
 let conn: Client | undefined;
 
 async function connection(config: PostgresConfig, force = false) {
@@ -69,31 +55,63 @@ export const usePostgreSQLAuthState = async (
     const tableName = config.tableName || 'auth';
     const retryRequestDelayMs = config.retryRequestDelayMs || 200;
     const maxtRetries = config.maxtRetries || 10;
+    let operationTail: Promise<void> = Promise.resolve();
 
-    const query = async (sql: string, values: any[]) => {
+    const fixedDatabaseFailure = (code: string, cause: unknown) => {
+        const failure = new Error(code);
+        Object.defineProperty(failure, 'cause', {
+            value: cause,
+            enumerable: false
+        });
+        return failure;
+    };
+
+    const executeQuery = async (sql: string, values: any[]) => {
+        const result = await sqlConn.query(sql, values);
+        return normalizeRows(result) as sqlData;
+    };
+
+    const serializeOperation = <T>(operation: () => Promise<T>): Promise<T> => {
+        const result = operationTail.then(operation, operation);
+        operationTail = result.then(
+            () => undefined,
+            () => undefined
+        );
+        return result;
+    };
+
+    const executeQueryWithRetry = async (sql: string, values: any[]) => {
+        let lastFailure: unknown;
         for (let x = 0; x < maxtRetries; x++) {
             try {
-                const result = await sqlConn.query(sql, values);
-                return normalizeRows(result) as sqlData;
+                return await executeQuery(sql, values);
             } catch (e) {
-                await new Promise((r) => setTimeout(r, retryRequestDelayMs));
+                lastFailure = e;
+                if (x + 1 < maxtRetries) {
+                    await new Promise((r) => setTimeout(r, retryRequestDelayMs));
+                }
             }
         }
-        return [] as sqlData;
+        throw fixedDatabaseFailure('postgres-query-retry-exhausted', lastFailure);
+    };
+
+    const query = async (sql: string, values: any[]) => {
+        return serializeOperation(() => executeQueryWithRetry(sql, values));
+    };
+
+    const parseStoredValue = (value: unknown) => {
+        if (value === null || value === undefined) return null;
+        const serialized = typeof value === 'object' ? JSON.stringify(value) : value;
+        if (typeof serialized !== 'string') return null;
+        return JSON.parse(serialized, BufferJSON.reviver);
     };
 
     const readData = async (id: string) => {
-        const data = await query(`SELECT value FROM ${tableName} WHERE id = $1 AND session = $2`, [
-            id,
-            config.session
-        ]);
-        if (!data[0]?.value) {
-            return null;
-        }
-        const creds =
-            typeof data[0].value === 'object' ? JSON.stringify(data[0].value) : data[0].value;
-        const credsParsed = JSON.parse(creds, BufferJSON.reviver);
-        return credsParsed;
+        const data = await query(
+            `SELECT value FROM ${tableName} WHERE id = $1 AND session = $2`,
+            [id, config.session]
+        );
+        return parseStoredValue(data[0]?.value);
     };
 
     const writeData = async (id: string, value: object) => {
@@ -107,17 +125,79 @@ export const usePostgreSQLAuthState = async (
         );
     };
 
-    const removeData = async (id: string) => {
-        await query(`DELETE FROM ${tableName} WHERE id = $1 AND session = $2`, [
-            id,
-            config.session
-        ]);
+    const writeSignalDataAtomically = async (data: {
+        [category: string]: { [id: string]: object | null | undefined } | undefined;
+    }) => {
+        const mutations: Array<{ id: string; valueFixed?: string }> = [];
+        for (const category in data) {
+            const categoryData = data[category];
+            if (!categoryData) continue;
+            for (const id in categoryData) {
+                const value = categoryData[id];
+                const mutation = { id: `${category}-${id}` } as {
+                    id: string;
+                    valueFixed?: string;
+                };
+                if (value !== null && value !== undefined) {
+                    mutation.valueFixed = JSON.stringify(value, BufferJSON.replacer);
+                }
+                mutations.push(mutation);
+            }
+        }
+        if (mutations.length === 0) return;
+
+        await serializeOperation(async () => {
+            let lastFailure: unknown;
+            for (let attempt = 0; attempt < maxtRetries; attempt++) {
+                let transactionStarted = false;
+                try {
+                    await executeQuery('BEGIN', []);
+                    transactionStarted = true;
+                    for (const mutation of mutations) {
+                        if (mutation.valueFixed !== undefined) {
+                            await executeQuery(
+                                `INSERT INTO ${tableName} (session, id, value)
+                                    VALUES ($1, $2, $3)
+                                    ON CONFLICT (session, id)
+                                    DO UPDATE SET value = EXCLUDED.value`,
+                                [config.session, mutation.id, mutation.valueFixed]
+                            );
+                        } else {
+                            await executeQuery(
+                                `DELETE FROM ${tableName} WHERE id = $1 AND session = $2`,
+                                [mutation.id, config.session]
+                            );
+                        }
+                    }
+                    await executeQuery('COMMIT', []);
+                    transactionStarted = false;
+                    return;
+                } catch (error) {
+                    lastFailure = error;
+                    if (transactionStarted) {
+                        try {
+                            await executeQuery('ROLLBACK', []);
+                        } catch (rollbackFailure) {
+                            throw fixedDatabaseFailure(
+                                'postgres-transaction-rollback-failed',
+                                rollbackFailure
+                            );
+                        }
+                    }
+                    if (attempt + 1 < maxtRetries) {
+                        await new Promise((resolve) => setTimeout(resolve, retryRequestDelayMs));
+                    }
+                }
+            }
+            throw fixedDatabaseFailure('postgres-transaction-retry-exhausted', lastFailure);
+        });
     };
 
     const clearAll = async () => {
-        await query(`DELETE FROM ${tableName} WHERE id != 'creds' AND session = $1`, [
-            config.session
-        ]);
+        await query(
+            `DELETE FROM ${tableName} WHERE id != 'creds' AND session = $1`,
+            [config.session]
+        );
     };
 
     const removeAll = async () => {
@@ -132,8 +212,24 @@ export const usePostgreSQLAuthState = async (
             keys: {
                 get: async (type, ids) => {
                     const data: { [id: string]: SignalDataTypeMap[typeof type] } = {};
+                    if (ids.length === 0) return data;
+                    const names = ids.map((id) => `${type}-${id}`);
+                    const expectedNames = new Map(names.map((name, index) => [name, ids[index]]));
+                    const rows = await query(
+                        `SELECT id, value
+                           FROM ${tableName}
+                          WHERE session = $1
+                            AND id = ANY($2::text[])`,
+                        [config.session, names]
+                    );
+                    const values = new Map<string, unknown>();
+                    for (const row of rows as any[]) {
+                        if (typeof row?.id === 'string' && expectedNames.has(row.id)) {
+                            values.set(row.id, row.value);
+                        }
+                    }
                     for (const id of ids) {
-                        let value = await readData(`${type}-${id}`);
+                        let value = parseStoredValue(values.get(`${type}-${id}`));
                         if (type === 'app-state-sync-key' && value) {
                             value = fromObject(value);
                         }
@@ -142,17 +238,7 @@ export const usePostgreSQLAuthState = async (
                     return data;
                 },
                 set: async (data) => {
-                    for (const category in data) {
-                        for (const id in data[category]) {
-                            const value = data[category][id];
-                            const name = `${category}-${id}`;
-                            if (value) {
-                                await writeData(name, value);
-                            } else {
-                                await removeData(name);
-                            }
-                        }
-                    }
+                    await writeSignalDataAtomically(data);
                 }
             }
         },
