@@ -50,15 +50,15 @@ export const useWorkerAuthState = async (
     };
 
     const readData = async (id: string) => {
-        try {
-            const raw = await query('readData', db, { id, session: getKey(id) });
-            if (!raw) return null;
-            const creds = typeof raw === 'object' ? JSON.stringify(raw) : String(raw);
-            const credsParsed = JSON.parse(creds, BufferJSON.reviver);
-            return credsParsed;
-        } catch {
-            return null;
-        }
+        // Fail-closed: a missing row returns null (legitimate "no state"),
+        // but an operational error (DB down, channel dead, retries exhausted)
+        // must THROW so callers never mistake it for "no state" and regenerate
+        // a fresh identity (which causes Bad MAC storms on contacts' sessions).
+        const raw = await query('readData', db, { id, session: getKey(id) });
+        if (raw === null || raw === undefined) return null;
+        const creds = typeof raw === 'object' ? JSON.stringify(raw) : String(raw);
+        const credsParsed = JSON.parse(creds, BufferJSON.reviver);
+        return credsParsed;
     };
 
     const writeData = async (id: string, value: object) => {
@@ -82,11 +82,10 @@ export const useWorkerAuthState = async (
 
     const readBatch = async (ids: string[]) => {
         if (ids.length === 0) return {} as any;
-        try {
-            return await query('readBatch', db, { session: getKey('*'), ids });
-        } catch {
-            return {} as any;
-        }
+        // Fail-closed: missing ids come back as null entries from the main
+        // process (legitimate), but an operational error must THROW instead of
+        // returning an empty map that baileys would read as "all keys missing".
+        return await query('readBatch', db, { session: getKey('*'), ids });
     };
 
     const clearAll = async () => {
